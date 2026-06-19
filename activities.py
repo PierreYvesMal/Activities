@@ -2,7 +2,8 @@ import cv2
 import numpy as np
 import os
 from pdf2image import convert_from_path
-
+from datetime import datetime
+import locale
 
 # =========================
 # IO / BASIC UTILITIES
@@ -109,12 +110,12 @@ def detect_vertical_separators(img):
 
     profile = np.sum(v > 0, axis=0).astype(np.float32)
     profile = cv2.GaussianBlur(profile.reshape(1, -1), (1, 51), 0).flatten()
-    profile = suppress_margins(profile, 0.05)
+    # profile = suppress_margins(profile, 0.05)
 
     peaks = []
     temp = profile.copy()
 
-    for _ in range(2):
+    for _ in range(4):
         x = int(np.argmax(temp))
         peaks.append(x)
         remove_neighborhood_1d(temp, x, 30)
@@ -134,12 +135,12 @@ def detect_horizontal_separators(img):
 
     profile = np.sum(h_lines > 0, axis=1).astype(np.float32)
     profile = cv2.GaussianBlur(profile.reshape(-1, 1), (51, 1), 0).flatten()
-    profile = suppress_margins(profile, 0.05)
+    # profile = suppress_margins(profile, 0.05)
 
     peaks = []
     temp = profile.copy()
 
-    for _ in range(5):
+    for _ in range(7):
         y = int(np.argmax(temp))
         peaks.append(y)
         remove_neighborhood_1d(temp, y, 30)
@@ -191,7 +192,6 @@ def split_into_3(img, peaks, out_dir="debug_sections"):
 
     return sections
 
-
 # =========================
 # PIPELINE
 # =========================
@@ -209,4 +209,18 @@ img_final = draw_horizontal_overlay(img_v, h_peaks)
 
 cv2.imwrite("final_overlay.png", img_final)
 
+locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
+
+today = datetime.now()
+print(today.strftime("%A %d %B %Y"))
+day=today.weekday()
+# print("Vertical peaks (columns):", v_peaks)
+# print("Horizontal peaks (rows):", h_peaks)
+if day >= len(h_peaks) - 2:
+    print("No schedule available for today.")
+else:
+    today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
+    cv2.imwrite("today_section.png", today_display)
+    cv2.imshow("Today's Section", today_display)
+cv2.waitKey(0)
 cv2.destroyAllWindows()
