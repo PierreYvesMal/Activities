@@ -4,6 +4,14 @@ import os
 from pdf2image import convert_from_path
 from datetime import datetime
 import locale
+from flask import Flask, send_file
+import threading
+import time
+
+app = Flask(__name__)
+
+LATEST_IMAGE = "today_section.png"
+PDF_PATH = "schedule.pdf"
 
 # =========================
 # IO / BASIC UTILITIES
@@ -196,31 +204,81 @@ def split_into_3(img, peaks, out_dir="debug_sections"):
 # PIPELINE
 # =========================
 
-img = pdf_to_cv_image("schedule.pdf")
+def process_loop():
+    global LATEST_IMAGE
 
-img = crop_schedule_grid(img)
-img = deskew(img)
+    while True:
+        try:
+            img = pdf_to_cv_image(PDF_PATH)
+            img = crop_schedule_grid(img)
+            img = deskew(img)
 
-v_peaks, _ = detect_vertical_separators(img)
-img_v = draw_vertical_overlay(img, v_peaks)
+            v_peaks, _ = detect_vertical_separators(img)
+            h_peaks = detect_horizontal_separators(img)
 
-h_peaks = detect_horizontal_separators(img)
-img_final = draw_horizontal_overlay(img_v, h_peaks)
+            day = datetime.now().weekday()
 
-cv2.imwrite("final_overlay.png", img_final)
+            if day < len(h_peaks) - 2:
+                today = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
 
-locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
+                cv2.imwrite(LATEST_IMAGE, today)
 
-today = datetime.now()
-print(today.strftime("%A %d %B %Y"))
-day=today.weekday()
-# print("Vertical peaks (columns):", v_peaks)
-# print("Horizontal peaks (rows):", h_peaks)
-if day >= len(h_peaks) - 2:
-    print("No schedule available for today.")
-else:
-    today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
-    cv2.imwrite("today_section.png", today_display)
-    cv2.imshow("Today's Section", today_display)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+        except Exception as e:
+            print("Error:", e)
+
+        time.sleep(60)  # refresh every minute
+
+
+@app.route("/")
+def index():
+    return f"""
+    <html>
+    <head>
+        <meta http-equiv="refresh" content="10">
+    </head>
+    <body style="margin:0">
+        <img src="/img?t={time.time()}" style="width:100%">
+    </body>
+    </html>
+    """
+
+
+@app.route("/img")
+def img():
+    return send_file(LATEST_IMAGE, mimetype="image/png")
+
+
+if __name__ == "__main__":
+    thread = threading.Thread(target=process_loop, daemon=True)
+    thread.start()
+
+    app.run(host="0.0.0.0", port=5000)
+
+# img = pdf_to_cv_image("schedule.pdf")
+
+# img = crop_schedule_grid(img)
+# img = deskew(img)
+
+# v_peaks, _ = detect_vertical_separators(img)
+# img_v = draw_vertical_overlay(img, v_peaks)
+
+# h_peaks = detect_horizontal_separators(img)
+# img_final = draw_horizontal_overlay(img_v, h_peaks)
+
+# cv2.imwrite("final_overlay.png", img_final)
+
+# locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
+
+# today = datetime.now()
+# print(today.strftime("%A %d %B %Y"))
+# day=today.weekday()
+# # print("Vertical peaks (columns):", v_peaks)
+# # print("Horizontal peaks (rows):", h_peaks)
+# if day >= len(h_peaks) - 2:
+#     print("No schedule available for today.")
+# else:
+#     today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
+#     cv2.imwrite("today_section.png", today_display)
+#     cv2.imshow("Today's Section", today_display)
+# cv2.waitKey(0)
+# cv2.destroyAllWindows()
