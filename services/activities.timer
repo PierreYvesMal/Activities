@@ -1,0 +1,10 @@
+[Unit]
+Description=Restart activities.service every hour
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1h
+Unit=activities-restart.service
+
+[Install]
+WantedBy=timers.target
