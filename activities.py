@@ -5,6 +5,9 @@ from pdf2image import convert_from_path
 from datetime import datetime
 import locale
 
+# TODO
+# Don't re-process everything. Check if converted image exists. Clean converted when new schedule.pdf arrives.
+
 # =========================
 # IO / BASIC UTILITIES
 # =========================
@@ -216,11 +219,19 @@ print(today.strftime("%A %d %B %Y"))
 day=today.weekday()
 # print("Vertical peaks (columns):", v_peaks)
 # print("Horizontal peaks (rows):", h_peaks)
+
+cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
+cv2.setWindowProperty(
+    "Image",
+    cv2.WND_PROP_FULLSCREEN,
+    cv2.WINDOW_FULLSCREEN
+)
+
 if day >= len(h_peaks) - 2:
     print("No schedule available for today.")
 else:
     today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
     cv2.imwrite("today_section.png", today_display)
-    cv2.imshow("Today's Section", today_display)
+    cv2.imshow("Image", today_display)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
