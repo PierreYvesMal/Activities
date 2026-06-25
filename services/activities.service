@@ -1,0 +1,19 @@
+[Unit]
+Description=Activities Python Application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rpy
+Environment=DISPLAY=:0
+WorkingDirectory=/home/rpy/Activities
+ExecStart=/home/rpy/Activities/venv/bin/python /home/rpy/Activities/activities.py
+Restart=always
+RestartSec=5
+
+# If your app needs access to the local HDMI desktop:
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=multi-user.target
