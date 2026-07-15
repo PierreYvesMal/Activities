@@ -1,0 +1,7 @@
+credentials.json
+token.pickle
+venv/
+temp/
+*.pdf
+*.png
+__pycache__/

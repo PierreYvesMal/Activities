@@ -4,6 +4,22 @@ import os
 from pdf2image import convert_from_path
 from datetime import datetime
 import locale
+from drive import GoogleDriveClient
+
+INPUT_FOLDER = "1rYLC7Dqrb5CpzmLpmdvTkjCiiHAk2Uff"
+PROCESSED_FOLDER = "1CDgW498BhuhpJ1uX1F2an7sGsRtxllB1"
+OVERLAY_FOLDER = "15D2aJsFI7FKgRF6H62u-q7Tni5b7ppvv"
+
+drive = GoogleDriveClient()
+
+file = drive.find_file_pattern(INPUT_FOLDER, "*.pdf")
+
+if file is None:
+    print("Not found")
+else:
+    drive.download_file(file["id"], "schedule.pdf")
+    drive.move_file(file["id"], PROCESSED_FOLDER)
+    print("Probably Downloaded and moved schedule.pdf")
 
 # TODO
 # Don't re-process everything. Check if converted image exists. Clean converted when new schedule.pdf arrives.
@@ -211,6 +227,7 @@ h_peaks = detect_horizontal_separators(img)
 img_final = draw_horizontal_overlay(img_v, h_peaks)
 
 cv2.imwrite("final_overlay.png", img_final)
+drive.push_file(OVERLAY_FOLDER, "final_overlay.png")
 
 locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
 
