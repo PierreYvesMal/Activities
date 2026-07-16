@@ -4,6 +4,7 @@ python3 -m venv venv
 
 source venv/bin/activate
 
-python3 -m pip install opencv-python numpy pdf2image
+pip install opencv-python numpy pdf2image
+pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
 
 python3 ./activities.py
