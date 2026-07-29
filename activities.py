@@ -5,6 +5,17 @@ from pdf2image import convert_from_path
 from datetime import datetime
 import locale
 from drive import GoogleDriveClient
+import signal
+import sys
+from multiprocessing import shared_memory
+
+running = True
+
+def signal_handler(sig, frame):
+    global running
+    print("Shutdown signal received")
+    running = False
+    cv2.destroyAllWindows()
 
 INPUT_FOLDER = "1rYLC7Dqrb5CpzmLpmdvTkjCiiHAk2Uff"
 PROCESSED_FOLDER = "1CDgW498BhuhpJ1uX1F2an7sGsRtxllB1"
@@ -237,6 +248,8 @@ day=today.weekday()
 # print("Vertical peaks (columns):", v_peaks)
 # print("Horizontal peaks (rows):", h_peaks)
 
+
+
 cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
 cv2.setWindowProperty(
     "Image",
@@ -249,6 +262,72 @@ if day >= len(h_peaks) - 2:
 else:
     today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
     cv2.imwrite("today_section.png", today_display)
-    cv2.imshow("Image", today_display)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+    # cv2.imshow("Image", today_display)
+
+    # Dimensions of your displayed image
+    TARGET_WIDTH = 1280
+    TARGET_HEIGHT = 720
+
+    # Open existing overlay shared memory
+    overlay_shm = shared_memory.SharedMemory(name="overlay")
+
+    overlay = np.ndarray(
+        (TARGET_HEIGHT, TARGET_WIDTH, 4),
+        dtype=np.uint8,
+        buffer=overlay_shm.buf
+    )
+
+    while True:
+        # Your existing computation
+        today_display = img[
+            h_peaks[day+1]:h_peaks[day+2],
+            v_peaks[0]:v_peaks[-1]
+        ]
+
+        h, w = today_display.shape[:2]
+
+        # Compute scale while preserving aspect ratio
+        scale = min(TARGET_WIDTH / w, TARGET_HEIGHT / h)
+
+        new_width = int(w * scale)
+        new_height = int(h * scale)
+
+        # Resize while keeping aspect ratio
+        resized = cv2.resize(
+            today_display,
+            (new_width, new_height),
+            interpolation=cv2.INTER_AREA
+        )
+
+        # Create black 720p background
+        background = np.zeros(
+            (TARGET_HEIGHT, TARGET_WIDTH, 3),
+            dtype=np.uint8
+        )
+
+        # Center the image
+        x_offset = (TARGET_WIDTH - new_width) // 2
+        y_offset = (TARGET_HEIGHT - new_height) // 2
+
+        background[
+            y_offset:y_offset + new_height,
+            x_offset:x_offset + new_width
+        ] = resized
+
+        # Blend overlay
+        alpha = overlay[:, :, 3:4].astype(np.float32) / 255.0
+
+        result = (
+            background.astype(np.float32) * (1.0 - alpha)
+            +
+            overlay[:, :, :3].astype(np.float32) * alpha
+        ).astype(np.uint8)
+
+
+        cv2.imshow("Image", result)
+
+        if cv2.waitKey(1) == 27:
+            break
+
+    overlay_shm.close()
+    cv2.destroyAllWindows()
