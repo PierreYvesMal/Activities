@@ -7,7 +7,10 @@ import locale
 from drive import GoogleDriveClient
 import signal
 import sys
-from multiprocessing import shared_memory
+import time
+
+HEIGHT = 720
+WIDTH = 1280
 
 running = True
 
@@ -223,6 +226,55 @@ def split_into_3(img, peaks, out_dir="debug_sections"):
     return sections
 
 # =========================
+# CLOCK OVERLAY
+# =========================
+
+def create_clock_overlay():
+    overlay = np.zeros(
+        (HEIGHT, WIDTH, 4),
+        dtype=np.uint8
+    )
+
+    clock = time.strftime("%H:%M:%S")
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 3
+    thickness = 5
+
+    (tw, th), baseline = cv2.getTextSize(
+        clock,
+        font,
+        scale,
+        thickness
+    )
+
+    x = WIDTH - tw - 50
+    y = th + 50
+
+    # Transparent black background
+    cv2.rectangle(
+        overlay,
+        (x - 20, y - th - 20),
+        (x + tw + 20, y + baseline + 20),
+        (0, 0, 0, 160),
+        -1
+    )
+
+    # White clock
+    cv2.putText(
+        overlay,
+        clock,
+        (x, y),
+        font,
+        scale,
+        (255, 255, 255, 255),
+        thickness,
+        cv2.LINE_AA
+    )
+
+    return overlay
+
+# =========================
 # PIPELINE
 # =========================
 
@@ -268,15 +320,6 @@ else:
     TARGET_WIDTH = 1280
     TARGET_HEIGHT = 720
 
-    # Open existing overlay shared memory
-    overlay_shm = shared_memory.SharedMemory(name="overlay")
-
-    overlay = np.ndarray(
-        (TARGET_HEIGHT, TARGET_WIDTH, 4),
-        dtype=np.uint8,
-        buffer=overlay_shm.buf
-    )
-
     while True:
         # Your existing computation
         today_display = img[
@@ -315,6 +358,7 @@ else:
         ] = resized
 
         # Blend overlay
+        overlay = create_clock_overlay()
         alpha = overlay[:, :, 3:4].astype(np.float32) / 255.0
 
         result = (
@@ -326,8 +370,7 @@ else:
 
         cv2.imshow("Image", result)
 
-        if cv2.waitKey(1) == 27:
+        if cv2.waitKey(10000) == 27:
             break
 
-    overlay_shm.close()
     cv2.destroyAllWindows()
