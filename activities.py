@@ -235,7 +235,7 @@ def create_clock_overlay():
         dtype=np.uint8
     )
 
-    clock = time.strftime("%H:%M:%S")
+    clock = time.strftime("%H:%M")
 
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 3
