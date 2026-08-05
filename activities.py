@@ -324,7 +324,7 @@ else:
         # Your existing computation
         today_display = img[
             h_peaks[day+1]:h_peaks[day+2],
-            v_peaks[0]:v_peaks[-1]
+            v_peaks[1]:v_peaks[-1]
         ]
 
         h, w = today_display.shape[:2]
