@@ -230,46 +230,60 @@ def split_into_3(img, peaks, out_dir="debug_sections"):
 # =========================
 
 def create_clock_overlay():
-    overlay = np.zeros(
-        (HEIGHT, WIDTH, 4),
-        dtype=np.uint8
-    )
+    overlay = np.zeros((HEIGHT, WIDTH, 4), dtype=np.uint8)
 
-    clock = time.strftime("%H:%M")
+    now = datetime.now()
+    day = f"{now.strftime('%A').capitalize()} {now.day}"
+    clock = now.strftime("%H:%M")
 
     font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = 3
-    thickness = 5
+    day_scale = 1.5
+    clock_scale = 3.0
+    thickness = 4
+    gap = 25
 
-    (tw, th), baseline = cv2.getTextSize(
-        clock,
-        font,
-        scale,
-        thickness
-    )
+    (day_w, day_h), day_base = cv2.getTextSize(day, font, day_scale, thickness)
+    (clock_w, clock_h), clock_base = cv2.getTextSize(clock, font, clock_scale, thickness)
 
-    x = WIDTH - tw - 50
-    y = th + 50
+    padding = 20
 
-    # Transparent black background
+    box_w = day_w + gap + clock_w + 2 * padding
+    box_h = max(day_h, clock_h) + max(day_base, clock_base) + 2 * padding
+
+    x = WIDTH - box_w - 30
+    y = 30
+
     cv2.rectangle(
         overlay,
-        (x - 20, y - th - 20),
-        (x + tw + 20, y + baseline + 20),
+        (x, y),
+        (x + box_w, y + box_h),
         (0, 0, 0, 160),
         -1
     )
 
-    # White clock
+    # Align both texts on their baseline
+    baseline_y = y + padding + max(day_h, clock_h)
+
+    cv2.putText(
+        overlay,
+        day,
+        (x + padding, baseline_y),
+        font,
+        day_scale,
+        (255, 255, 255, 255),
+        thickness,
+        cv2.LINE_AA,
+    )
+
     cv2.putText(
         overlay,
         clock,
-        (x, y),
+        (x + padding + day_w + gap, baseline_y),
         font,
-        scale,
+        clock_scale,
         (255, 255, 255, 255),
         thickness,
-        cv2.LINE_AA
+        cv2.LINE_AA,
     )
 
     return overlay
