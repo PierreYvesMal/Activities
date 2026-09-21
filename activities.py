@@ -335,41 +335,49 @@ else:
     TARGET_HEIGHT = 720
 
     while True:
-        # Your existing computation
-        today_display = img[
-            h_peaks[day+1]:h_peaks[day+2],
-            v_peaks[1]:v_peaks[-1]
-        ]
+        # Check if it's past 10pm (night mode)
+        if datetime.now().hour >= 20:
+            # Create a fully black 720p background
+            background = np.zeros(
+                (TARGET_HEIGHT, TARGET_WIDTH, 3),
+                dtype=np.uint8
+            )
+        else:
+            # Your existing computation
+            today_display = img[
+                h_peaks[day+1]:h_peaks[day+2],
+                v_peaks[1]:v_peaks[-1]
+            ]
 
-        h, w = today_display.shape[:2]
+            h, w = today_display.shape[:2]
 
-        # Compute scale while preserving aspect ratio
-        scale = min(TARGET_WIDTH / w, TARGET_HEIGHT / h)
+            # Compute scale while preserving aspect ratio
+            scale = min(TARGET_WIDTH / w, TARGET_HEIGHT / h)
 
-        new_width = int(w * scale)
-        new_height = int(h * scale)
+            new_width = int(w * scale)
+            new_height = int(h * scale)
 
-        # Resize while keeping aspect ratio
-        resized = cv2.resize(
-            today_display,
-            (new_width, new_height),
-            interpolation=cv2.INTER_AREA
-        )
+            # Resize while keeping aspect ratio
+            resized = cv2.resize(
+                today_display,
+                (new_width, new_height),
+                interpolation=cv2.INTER_AREA
+            )
 
-        # Create black 720p background
-        background = np.zeros(
-            (TARGET_HEIGHT, TARGET_WIDTH, 3),
-            dtype=np.uint8
-        )
+            # Create black 720p background
+            background = np.zeros(
+                (TARGET_HEIGHT, TARGET_WIDTH, 3),
+                dtype=np.uint8
+            )
 
-        # Center the image
-        x_offset = (TARGET_WIDTH - new_width) // 2
-        y_offset = (TARGET_HEIGHT - new_height) // 2
+            # Center the image
+            x_offset = (TARGET_WIDTH - new_width) // 2
+            y_offset = (TARGET_HEIGHT - new_height) // 2
 
-        background[
-            y_offset:y_offset + new_height,
-            x_offset:x_offset + new_width
-        ] = resized
+            background[
+                y_offset:y_offset + new_height,
+                x_offset:x_offset + new_width
+            ] = resized
 
         # Blend overlay
         overlay = create_clock_overlay()
