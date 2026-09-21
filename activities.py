@@ -23,8 +23,12 @@ def signal_handler(sig, frame):
 INPUT_FOLDER = "1rYLC7Dqrb5CpzmLpmdvTkjCiiHAk2Uff"
 PROCESSED_FOLDER = "1CDgW498BhuhpJ1uX1F2an7sGsRtxllB1"
 OVERLAY_FOLDER = "15D2aJsFI7FKgRF6H62u-q7Tni5b7ppvv"
+PROCESSED_IMAGE_PATH = "processed.npy"
+PEAKS_PATH = "peaks.npz"
 
 drive = GoogleDriveClient()
+
+new_file_downloaded = False
 
 file = drive.find_file_pattern(INPUT_FOLDER, "*.pdf")
 
@@ -34,9 +38,7 @@ else:
     drive.download_file(file["id"], "schedule.pdf")
     drive.move_file(file["id"], PROCESSED_FOLDER)
     print("Probably Downloaded and moved schedule.pdf")
-
-# TODO
-# Don't re-process everything. Check if converted image exists. Clean converted when new schedule.pdf arrives.
+    new_file_downloaded = True
 
 # =========================
 # IO / BASIC UTILITIES
@@ -68,6 +70,17 @@ def remove_neighborhood_1d(arr, center, radius):
     left = max(0, center - radius)
     right = min(len(arr), center + radius)
     arr[left:right] = 0
+
+
+def save_processed(img, v_peaks, h_peaks):
+    np.save(PROCESSED_IMAGE_PATH, img)
+    np.savez(PEAKS_PATH, v_peaks=np.array(v_peaks), h_peaks=np.array(h_peaks))
+
+
+def load_processed():
+    img = np.load(PROCESSED_IMAGE_PATH)
+    data = np.load(PEAKS_PATH)
+    return img, data["v_peaks"].tolist(), data["h_peaks"].tolist()
 
 
 # =========================
@@ -344,19 +357,34 @@ def blend_overlay(background, overlay):
 
 def main():
 
-    img = pdf_to_cv_image("schedule.pdf")
+    if new_file_downloaded:
+        img = pdf_to_cv_image("schedule.pdf")
+        img = crop_schedule_grid(img)
+        img = deskew(img)
 
-    img = crop_schedule_grid(img)
-    img = deskew(img)
+        v_peaks, _ = detect_vertical_separators(img)
+        h_peaks = detect_horizontal_separators(img)
 
-    v_peaks, _ = detect_vertical_separators(img)
-    img_v = draw_vertical_overlay(img, v_peaks)
+        save_processed(img, v_peaks, h_peaks)
 
-    h_peaks = detect_horizontal_separators(img)
-    img_final = draw_horizontal_overlay(img_v, h_peaks)
+        # Save for remote debug
+        img_v = draw_vertical_overlay(img, v_peaks)
+        img_final = draw_horizontal_overlay(img_v, h_peaks)
 
-    cv2.imwrite("final_overlay.png", img_final)
-    drive.push_file(OVERLAY_FOLDER, "final_overlay.png")
+        cv2.imwrite("final_overlay.png", img_final)
+        drive.push_file(OVERLAY_FOLDER, "final_overlay.png")
+    elif os.path.exists(PROCESSED_IMAGE_PATH) and os.path.exists(PEAKS_PATH):
+        img, v_peaks, h_peaks = load_processed()
+    else:
+        print("No processed image found, processing local file...")
+        img = pdf_to_cv_image("schedule.pdf")
+        img = crop_schedule_grid(img)
+        img = deskew(img)
+
+        v_peaks, _ = detect_vertical_separators(img)
+        h_peaks = detect_horizontal_separators(img)
+
+        save_processed(img, v_peaks, h_peaks)
 
     locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
 
@@ -365,8 +393,6 @@ def main():
     day=today.weekday()
     # print("Vertical peaks (columns):", v_peaks)
     # print("Horizontal peaks (rows):", h_peaks)
-
-
 
     cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
     cv2.setWindowProperty(
@@ -383,8 +409,8 @@ def main():
         # cv2.imshow("Image", today_display)
 
         while True:
-            # Check if it's past 10pm (night mode)
-            if datetime.now().hour >= 20:
+            # Check if it's between 8PM and 7AM (night mode)
+            if datetime.now().hour >= 20 or datetime.now().hour < 7:
                 # Create a fully black 720p background
                 background = np.zeros(
                     (HEIGHT, WIDTH, 3),
