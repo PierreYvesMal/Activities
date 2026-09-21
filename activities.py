@@ -226,6 +226,46 @@ def split_into_3(img, peaks, out_dir="debug_sections"):
     return sections
 
 # =========================
+# CANVAS
+# =========================
+
+def fit_to_canvas(img, target_width=WIDTH, target_height=HEIGHT):
+    """Resize img to fit within target_width x target_height while preserving
+    aspect ratio, then center it on a black canvas of the target size."""
+    h, w = img.shape[:2]
+
+    # Compute scale while preserving aspect ratio
+    scale = min(target_width / w, target_height / h)
+
+    new_width = int(w * scale)
+    new_height = int(h * scale)
+
+    # Resize while keeping aspect ratio
+    resized = cv2.resize(
+        img,
+        (new_width, new_height),
+        interpolation=cv2.INTER_AREA
+    )
+
+    # Create black canvas
+    canvas = np.zeros(
+        (target_height, target_width, 3),
+        dtype=np.uint8
+    )
+
+    # Center the image
+    x_offset = (target_width - new_width) // 2
+    y_offset = (target_height - new_height) // 2
+
+    canvas[
+        y_offset:y_offset + new_height,
+        x_offset:x_offset + new_width
+    ] = resized
+
+    return canvas
+
+
+# =========================
 # CLOCK OVERLAY
 # =========================
 
@@ -288,6 +328,16 @@ def create_clock_overlay():
 
     return overlay
 
+
+def blend_overlay(background, overlay):
+    """Alpha-composite an RGBA overlay onto a BGR background."""
+    alpha = overlay[:, :, 3:4].astype(np.float32) / 255.0
+    return (
+        background.astype(np.float32) * (1.0 - alpha)
+        + overlay[:, :, :3].astype(np.float32) * alpha
+    ).astype(np.uint8)
+
+
 # =========================
 # PIPELINE
 # =========================
@@ -332,16 +382,12 @@ def main():
         cv2.imwrite("today_section.png", today_display)
         # cv2.imshow("Image", today_display)
 
-        # Dimensions of your displayed image
-        TARGET_WIDTH = 1280
-        TARGET_HEIGHT = 720
-
         while True:
             # Check if it's past 10pm (night mode)
             if datetime.now().hour >= 20:
                 # Create a fully black 720p background
                 background = np.zeros(
-                    (TARGET_HEIGHT, TARGET_WIDTH, 3),
+                    (HEIGHT, WIDTH, 3),
                     dtype=np.uint8
                 )
             else:
@@ -350,46 +396,11 @@ def main():
                     v_peaks[1]:v_peaks[-1]
                 ]
 
-                h, w = today_display.shape[:2]
-
-                # Compute scale while preserving aspect ratio
-                scale = min(TARGET_WIDTH / w, TARGET_HEIGHT / h)
-
-                new_width = int(w * scale)
-                new_height = int(h * scale)
-
-                # Resize while keeping aspect ratio
-                resized = cv2.resize(
-                    today_display,
-                    (new_width, new_height),
-                    interpolation=cv2.INTER_AREA
-                )
-
-                # Create black 720p background
-                background = np.zeros(
-                    (TARGET_HEIGHT, TARGET_WIDTH, 3),
-                    dtype=np.uint8
-                )
-
-                # Center the image
-                x_offset = (TARGET_WIDTH - new_width) // 2
-                y_offset = (TARGET_HEIGHT - new_height) // 2
-
-                background[
-                    y_offset:y_offset + new_height,
-                    x_offset:x_offset + new_width
-                ] = resized
+                background = fit_to_canvas(today_display)
 
             # Blend overlay
             overlay = create_clock_overlay()
-            alpha = overlay[:, :, 3:4].astype(np.float32) / 255.0
-
-            result = (
-                background.astype(np.float32) * (1.0 - alpha)
-                +
-                overlay[:, :, :3].astype(np.float32) * alpha
-            ).astype(np.uint8)
-
+            result = blend_overlay(background, overlay)
 
             cv2.imshow("Image", result)
 
