@@ -292,107 +292,113 @@ def create_clock_overlay():
 # PIPELINE
 # =========================
 
-img = pdf_to_cv_image("schedule.pdf")
+def main():
 
-img = crop_schedule_grid(img)
-img = deskew(img)
+    img = pdf_to_cv_image("schedule.pdf")
 
-v_peaks, _ = detect_vertical_separators(img)
-img_v = draw_vertical_overlay(img, v_peaks)
+    img = crop_schedule_grid(img)
+    img = deskew(img)
 
-h_peaks = detect_horizontal_separators(img)
-img_final = draw_horizontal_overlay(img_v, h_peaks)
+    v_peaks, _ = detect_vertical_separators(img)
+    img_v = draw_vertical_overlay(img, v_peaks)
 
-cv2.imwrite("final_overlay.png", img_final)
-drive.push_file(OVERLAY_FOLDER, "final_overlay.png")
+    h_peaks = detect_horizontal_separators(img)
+    img_final = draw_horizontal_overlay(img_v, h_peaks)
 
-locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
+    cv2.imwrite("final_overlay.png", img_final)
+    drive.push_file(OVERLAY_FOLDER, "final_overlay.png")
 
-today = datetime.now()
-print(today.strftime("%A %d %B %Y"))
-day=today.weekday()
-# print("Vertical peaks (columns):", v_peaks)
-# print("Horizontal peaks (rows):", h_peaks)
+    locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
 
-
-
-cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
-cv2.setWindowProperty(
-    "Image",
-    cv2.WND_PROP_FULLSCREEN,
-    cv2.WINDOW_FULLSCREEN
-)
-
-if day >= len(h_peaks) - 2:
-    print("No schedule available for today.")
-else:
-    today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
-    cv2.imwrite("today_section.png", today_display)
-    # cv2.imshow("Image", today_display)
-
-    # Dimensions of your displayed image
-    TARGET_WIDTH = 1280
-    TARGET_HEIGHT = 720
-
-    while True:
-        # Check if it's past 10pm (night mode)
-        if datetime.now().hour >= 20:
-            # Create a fully black 720p background
-            background = np.zeros(
-                (TARGET_HEIGHT, TARGET_WIDTH, 3),
-                dtype=np.uint8
-            )
-        else:
-            # Your existing computation
-            today_display = img[
-                h_peaks[day+1]:h_peaks[day+2],
-                v_peaks[1]:v_peaks[-1]
-            ]
-
-            h, w = today_display.shape[:2]
-
-            # Compute scale while preserving aspect ratio
-            scale = min(TARGET_WIDTH / w, TARGET_HEIGHT / h)
-
-            new_width = int(w * scale)
-            new_height = int(h * scale)
-
-            # Resize while keeping aspect ratio
-            resized = cv2.resize(
-                today_display,
-                (new_width, new_height),
-                interpolation=cv2.INTER_AREA
-            )
-
-            # Create black 720p background
-            background = np.zeros(
-                (TARGET_HEIGHT, TARGET_WIDTH, 3),
-                dtype=np.uint8
-            )
-
-            # Center the image
-            x_offset = (TARGET_WIDTH - new_width) // 2
-            y_offset = (TARGET_HEIGHT - new_height) // 2
-
-            background[
-                y_offset:y_offset + new_height,
-                x_offset:x_offset + new_width
-            ] = resized
-
-        # Blend overlay
-        overlay = create_clock_overlay()
-        alpha = overlay[:, :, 3:4].astype(np.float32) / 255.0
-
-        result = (
-            background.astype(np.float32) * (1.0 - alpha)
-            +
-            overlay[:, :, :3].astype(np.float32) * alpha
-        ).astype(np.uint8)
+    today = datetime.now()
+    print(today.strftime("%A %d %B %Y"))
+    day=today.weekday()
+    # print("Vertical peaks (columns):", v_peaks)
+    # print("Horizontal peaks (rows):", h_peaks)
 
 
-        cv2.imshow("Image", result)
 
-        if cv2.waitKey(10000) == 27:
-            break
+    cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty(
+        "Image",
+        cv2.WND_PROP_FULLSCREEN,
+        cv2.WINDOW_FULLSCREEN
+    )
 
-    cv2.destroyAllWindows()
+    if day >= len(h_peaks) - 2:
+        print("No schedule available for today.")
+    else:
+        today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
+        cv2.imwrite("today_section.png", today_display)
+        # cv2.imshow("Image", today_display)
+
+        # Dimensions of your displayed image
+        TARGET_WIDTH = 1280
+        TARGET_HEIGHT = 720
+
+        while True:
+            # Check if it's past 10pm (night mode)
+            if datetime.now().hour >= 20:
+                # Create a fully black 720p background
+                background = np.zeros(
+                    (TARGET_HEIGHT, TARGET_WIDTH, 3),
+                    dtype=np.uint8
+                )
+            else:
+                today_display = img[
+                    h_peaks[day+1]:h_peaks[day+2],
+                    v_peaks[1]:v_peaks[-1]
+                ]
+
+                h, w = today_display.shape[:2]
+
+                # Compute scale while preserving aspect ratio
+                scale = min(TARGET_WIDTH / w, TARGET_HEIGHT / h)
+
+                new_width = int(w * scale)
+                new_height = int(h * scale)
+
+                # Resize while keeping aspect ratio
+                resized = cv2.resize(
+                    today_display,
+                    (new_width, new_height),
+                    interpolation=cv2.INTER_AREA
+                )
+
+                # Create black 720p background
+                background = np.zeros(
+                    (TARGET_HEIGHT, TARGET_WIDTH, 3),
+                    dtype=np.uint8
+                )
+
+                # Center the image
+                x_offset = (TARGET_WIDTH - new_width) // 2
+                y_offset = (TARGET_HEIGHT - new_height) // 2
+
+                background[
+                    y_offset:y_offset + new_height,
+                    x_offset:x_offset + new_width
+                ] = resized
+
+            # Blend overlay
+            overlay = create_clock_overlay()
+            alpha = overlay[:, :, 3:4].astype(np.float32) / 255.0
+
+            result = (
+                background.astype(np.float32) * (1.0 - alpha)
+                +
+                overlay[:, :, :3].astype(np.float32) * alpha
+            ).astype(np.uint8)
+
+
+            cv2.imshow("Image", result)
+
+            key = cv2.waitKey(10000)
+            if key in (13, 27, ord('q')):  # Enter, ESC, or 'q'
+                break
+
+
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
