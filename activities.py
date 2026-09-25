@@ -8,6 +8,8 @@ from drive import GoogleDriveClient
 import signal
 import sys
 import time
+import pytesseract
+import re
 
 HEIGHT = 720
 WIDTH = 1280
@@ -352,6 +354,34 @@ def blend_overlay(background, overlay):
 
 
 # =========================
+# OCR
+# =========================
+
+def ocr(img):
+    """Extract the day name and number from a cropped schedule header cell.
+
+    The input image is expected to be a clean, deskewed crop containing
+    only text like 'Vendredi 19'. Returns the recognized text as a string.
+    """
+    # Convert to grayscale if needed
+    gray = to_gray(img)
+    cv2.imwrite("ocr_step1_gray.png", gray)
+
+    # Upscaling and binarizing made the OCR worse.
+
+    # OCR config: uniform block of text (handles 2 lines: "Vendredi" + "19"),
+    # French language, alphanumeric whitelist only
+    config = (
+        '--oem 3 --psm 6 '
+        '-c tessedit_char_whitelist='
+        'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 '
+    )
+    text = pytesseract.image_to_string(gray, lang='fra', config=config)
+
+    return text.strip()
+
+
+# =========================
 # PIPELINE
 # =========================
 
@@ -403,9 +433,16 @@ def main():
         cv2.WINDOW_FULLSCREEN
     )
 
+    text = ocr(img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[1]])
+    print("OCR:")
+    print(text)
+    match = re.search(r'\d+', text)
+    number = match.group() if match else ""
+    print(number)  # "19"
+
     while True:
-        # Check if it's between 8PM and 7AM (night mode)
-        if day >= len(h_peaks) - 2 or datetime.now().hour >= 20 or datetime.now().hour < 7:
+        # Week-end or night
+        if False and (day >= len(h_peaks) - 2 or datetime.now().hour >= 20 or datetime.now().hour < 7):
             # Create a fully black 720p background
             background = np.zeros(
                 (HEIGHT, WIDTH, 3),
@@ -415,6 +452,7 @@ def main():
             # debug
             # today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
             # cv2.imwrite("today_section.png", today_display)
+
             today_display = img[
                 h_peaks[day+1]:h_peaks[day+2],
                 v_peaks[1]:v_peaks[-1]
