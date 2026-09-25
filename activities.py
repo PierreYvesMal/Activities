@@ -373,8 +373,10 @@ def main():
 
         cv2.imwrite("final_overlay.png", img_final)
         drive.push_file(OVERLAY_FOLDER, "final_overlay.png")
+
     elif os.path.exists(PROCESSED_IMAGE_PATH) and os.path.exists(PEAKS_PATH):
         img, v_peaks, h_peaks = load_processed()
+
     else:
         print("No processed image found, processing local file...")
         img = pdf_to_cv_image("schedule.pdf")
@@ -401,41 +403,36 @@ def main():
         cv2.WINDOW_FULLSCREEN
     )
 
-    if day >= len(h_peaks) - 2:
-        print("No schedule available for today.")
-    else:
-        today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
-        cv2.imwrite("today_section.png", today_display)
-        # cv2.imshow("Image", today_display)
+    while True:
+        # Check if it's between 8PM and 7AM (night mode)
+        if day >= len(h_peaks) - 2 or datetime.now().hour >= 20 or datetime.now().hour < 7:
+            # Create a fully black 720p background
+            background = np.zeros(
+                (HEIGHT, WIDTH, 3),
+                dtype=np.uint8
+            )
+        else:
+            # debug
+            # today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
+            # cv2.imwrite("today_section.png", today_display)
+            today_display = img[
+                h_peaks[day+1]:h_peaks[day+2],
+                v_peaks[1]:v_peaks[-1]
+            ]
 
-        while True:
-            # Check if it's between 8PM and 7AM (night mode)
-            if datetime.now().hour >= 20 or datetime.now().hour < 7:
-                # Create a fully black 720p background
-                background = np.zeros(
-                    (HEIGHT, WIDTH, 3),
-                    dtype=np.uint8
-                )
-            else:
-                today_display = img[
-                    h_peaks[day+1]:h_peaks[day+2],
-                    v_peaks[1]:v_peaks[-1]
-                ]
+            background = fit_to_canvas(today_display)
 
-                background = fit_to_canvas(today_display)
+        # Blend overlay
+        overlay = create_clock_overlay()
+        result = blend_overlay(background, overlay)
 
-            # Blend overlay
-            overlay = create_clock_overlay()
-            result = blend_overlay(background, overlay)
+        cv2.imshow("Image", result)
 
-            cv2.imshow("Image", result)
+        key = cv2.waitKey(10000)
+        if key in (13, 27, ord('q')):  # Enter, ESC, or 'q'
+            break
 
-            key = cv2.waitKey(10000)
-            if key in (13, 27, ord('q')):  # Enter, ESC, or 'q'
-                break
-
-
-        cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
