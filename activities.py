@@ -437,12 +437,25 @@ def main():
     print("OCR:")
     print(text)
     match = re.search(r'\d+', text)
-    number = match.group() if match else ""
-    print(number)  # "19"
+    ocr_day = int(match.group()) if match else None
+
+    # Compare with today's day
+    today_day = datetime.now().day
+
+    wrong_week = False
+    if ocr_day is None:
+        print("⚠️  Could not extract day number from OCR")
+    elif ocr_day == today_day:
+        print(f"✅ OCR day ({ocr_day}) matches today ({today_day})")
+    elif ocr_day == today_day - 7 or ocr_day == today_day - 14:
+        print("OCR definitively found this is older week")
+        wrong_week = True
+    else:
+        print(f"⚠️  Mismatch: OCR says {ocr_day}, today is {today_day}")
 
     while True:
-        # Week-end or night
-        if False and (day >= len(h_peaks) - 2 or datetime.now().hour >= 20 or datetime.now().hour < 7):
+        # Wrong week or Week-end or night
+        if wrong_week or (day >= len(h_peaks) - 2 or datetime.now().hour >= 20 or datetime.now().hour < 7):
             # Create a fully black 720p background
             background = np.zeros(
                 (HEIGHT, WIDTH, 3),
