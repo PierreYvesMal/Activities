@@ -365,7 +365,6 @@ def ocr(img):
     """
     # Convert to grayscale if needed
     gray = to_gray(img)
-    cv2.imwrite("ocr_step1_gray.png", gray)
 
     # Upscaling and binarizing made the OCR worse.
 
