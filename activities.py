@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import os
 from pdf2image import convert_from_path
-from datetime import datetime
+from datetime import datetime, timedelta
 import locale
 from drive import GoogleDriveClient
 import signal
@@ -446,7 +446,7 @@ def main():
         print("⚠️  Could not extract day number from OCR")
     elif ocr_day == today_day:
         print(f"✅ OCR day ({ocr_day}) matches today ({today_day})")
-    elif ocr_day == today_day - 7 or ocr_day == today_day - 14:
+    elif ocr_day in [(datetime.today() - timedelta(weeks=1)).day, (datetime.today() - timedelta(weeks=2)).day]:
         print("OCR definitively found this is older week")
         wrong_week = True
     else:
