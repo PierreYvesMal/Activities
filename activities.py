@@ -541,13 +541,27 @@ def schedule_is_up_to_date(img, v_peaks, h_peaks, today):
     print(f"OCR: {text}")
     match = re.search(r"\d+", text)
     ocr_day = int(match.group()) if match else None
-    if ocr_day == today.day:
-        print(f"OCR day ({ocr_day}) matches today ({today.day})")
+
+
+    # Compare with today's day
+    today_day = datetime.now().day
+
+    # Day-of-month of the same weekday in each of the previous 4 weeks
+    previous_weeks_days = {
+        (today - timedelta(weeks=n)).day for n in range(1, 5)
+    }
+    if ocr_day is None:
+        print("⚠️  Could not extract day number from OCR")
         return True
-
-    print(f"Schedule is not up to date (OCR day: {ocr_day}, today: {today.day})")
-    return False
-
+    elif ocr_day == today_day:
+        print(f"✅ OCR day ({ocr_day}) matches today ({today_day})")
+        return True
+    elif ocr_day in previous_weeks_days:
+        print("OCR definitively found this is older week")
+        return False
+    else:
+        print(f"⚠️  Mismatch: OCR says {ocr_day}, today is {today_day}")
+        return True
 
 def make_error_background():
     background = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
