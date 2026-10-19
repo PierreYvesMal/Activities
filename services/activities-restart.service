@@ -1,6 +1,0 @@
-[Unit]
-Description=Restart activities.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/systemctl restart activities.service
