@@ -441,12 +441,16 @@ def main():
     # Compare with today's day
     today_day = datetime.now().day
 
+    # Day-of-month of the same weekday in each of the previous 4 weeks
+    previous_weeks_days = {
+        (today - timedelta(weeks=n)).day for n in range(1, 5)
+    }
     wrong_week = False
     if ocr_day is None:
         print("⚠️  Could not extract day number from OCR")
     elif ocr_day == today_day:
         print(f"✅ OCR day ({ocr_day}) matches today ({today_day})")
-    elif ocr_day in [(datetime.today() - timedelta(weeks=1)).day, (datetime.today() - timedelta(weeks=2)).day]:
+    elif ocr_day in previous_weeks_days:
         print("OCR definitively found this is older week")
         wrong_week = True
     else:
