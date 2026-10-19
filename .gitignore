@@ -4,4 +4,8 @@ venv/
 temp/
 *.pdf
 *.png
+*.jpg
+*.npz
+*.deb
 __pycache__/
+package/
