@@ -2,15 +2,35 @@ import cv2
 import numpy as np
 import os
 from pdf2image import convert_from_path
-from datetime import datetime
+from datetime import datetime, timedelta
 import locale
 from drive import GoogleDriveClient
+import signal
+import sys
+import time
+import pytesseract
+import re
+
+HEIGHT = 720
+WIDTH = 1280
+
+running = True
+
+def signal_handler(sig, frame):
+    global running
+    print("Shutdown signal received")
+    running = False
+    cv2.destroyAllWindows()
 
 INPUT_FOLDER = "1rYLC7Dqrb5CpzmLpmdvTkjCiiHAk2Uff"
 PROCESSED_FOLDER = "1CDgW498BhuhpJ1uX1F2an7sGsRtxllB1"
 OVERLAY_FOLDER = "15D2aJsFI7FKgRF6H62u-q7Tni5b7ppvv"
+PROCESSED_IMAGE_PATH = "processed.npy"
+PEAKS_PATH = "peaks.npz"
 
 drive = GoogleDriveClient()
+
+new_file_downloaded = False
 
 file = drive.find_file_pattern(INPUT_FOLDER, "*.pdf")
 
@@ -20,9 +40,7 @@ else:
     drive.download_file(file["id"], "schedule.pdf")
     drive.move_file(file["id"], PROCESSED_FOLDER)
     print("Probably Downloaded and moved schedule.pdf")
-
-# TODO
-# Don't re-process everything. Check if converted image exists. Clean converted when new schedule.pdf arrives.
+    new_file_downloaded = True
 
 # =========================
 # IO / BASIC UTILITIES
@@ -54,6 +72,17 @@ def remove_neighborhood_1d(arr, center, radius):
     left = max(0, center - radius)
     right = min(len(arr), center + radius)
     arr[left:right] = 0
+
+
+def save_processed(img, v_peaks, h_peaks):
+    np.save(PROCESSED_IMAGE_PATH, img)
+    np.savez(PEAKS_PATH, v_peaks=np.array(v_peaks), h_peaks=np.array(h_peaks))
+
+
+def load_processed():
+    img = np.load(PROCESSED_IMAGE_PATH)
+    data = np.load(PEAKS_PATH)
+    return img, data["v_peaks"].tolist(), data["h_peaks"].tolist()
 
 
 # =========================
@@ -212,43 +241,252 @@ def split_into_3(img, peaks, out_dir="debug_sections"):
     return sections
 
 # =========================
+# CANVAS
+# =========================
+
+def fit_to_canvas(img, target_width=WIDTH, target_height=HEIGHT):
+    """Resize img to fit within target_width x target_height while preserving
+    aspect ratio, then center it on a black canvas of the target size."""
+    h, w = img.shape[:2]
+
+    # Compute scale while preserving aspect ratio
+    scale = min(target_width / w, target_height / h)
+
+    new_width = int(w * scale)
+    new_height = int(h * scale)
+
+    # Resize while keeping aspect ratio
+    resized = cv2.resize(
+        img,
+        (new_width, new_height),
+        interpolation=cv2.INTER_AREA
+    )
+
+    # Create black canvas
+    canvas = np.zeros(
+        (target_height, target_width, 3),
+        dtype=np.uint8
+    )
+
+    # Center the image
+    x_offset = (target_width - new_width) // 2
+    y_offset = (target_height - new_height) // 2
+
+    canvas[
+        y_offset:y_offset + new_height,
+        x_offset:x_offset + new_width
+    ] = resized
+
+    return canvas
+
+
+# =========================
+# CLOCK OVERLAY
+# =========================
+
+def create_clock_overlay():
+    overlay = np.zeros((HEIGHT, WIDTH, 4), dtype=np.uint8)
+
+    now = datetime.now()
+    day = f"{now.strftime('%A').capitalize()} {now.day}"
+    clock = now.strftime("%H:%M")
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    day_scale = 1.5
+    clock_scale = 3.0
+    thickness = 4
+    gap = 25
+
+    (day_w, day_h), day_base = cv2.getTextSize(day, font, day_scale, thickness)
+    (clock_w, clock_h), clock_base = cv2.getTextSize(clock, font, clock_scale, thickness)
+
+    padding = 20
+
+    box_w = day_w + gap + clock_w + 2 * padding
+    box_h = max(day_h, clock_h) + max(day_base, clock_base) + 2 * padding
+
+    x = WIDTH - box_w - 30
+    y = 30
+
+    cv2.rectangle(
+        overlay,
+        (x, y),
+        (x + box_w, y + box_h),
+        (0, 0, 0, 160),
+        -1
+    )
+
+    # Align both texts on their baseline
+    baseline_y = y + padding + max(day_h, clock_h)
+
+    cv2.putText(
+        overlay,
+        day,
+        (x + padding, baseline_y),
+        font,
+        day_scale,
+        (255, 255, 255, 255),
+        thickness,
+        cv2.LINE_AA,
+    )
+
+    cv2.putText(
+        overlay,
+        clock,
+        (x + padding + day_w + gap, baseline_y),
+        font,
+        clock_scale,
+        (255, 255, 255, 255),
+        thickness,
+        cv2.LINE_AA,
+    )
+
+    return overlay
+
+
+def blend_overlay(background, overlay):
+    """Alpha-composite an RGBA overlay onto a BGR background."""
+    alpha = overlay[:, :, 3:4].astype(np.float32) / 255.0
+    return (
+        background.astype(np.float32) * (1.0 - alpha)
+        + overlay[:, :, :3].astype(np.float32) * alpha
+    ).astype(np.uint8)
+
+
+# =========================
+# OCR
+# =========================
+
+def ocr(img):
+    """Extract the day name and number from a cropped schedule header cell.
+
+    The input image is expected to be a clean, deskewed crop containing
+    only text like 'Vendredi 19'. Returns the recognized text as a string.
+    """
+    # Convert to grayscale if needed
+    gray = to_gray(img)
+
+    # Upscaling and binarizing made the OCR worse.
+
+    # OCR config: uniform block of text (handles 2 lines: "Vendredi" + "19"),
+    # French language, alphanumeric whitelist only
+    config = (
+        '--oem 3 --psm 6 '
+        '-c tessedit_char_whitelist='
+        'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 '
+    )
+    text = pytesseract.image_to_string(gray, lang='fra', config=config)
+
+    return text.strip()
+
+
+# =========================
 # PIPELINE
 # =========================
 
-img = pdf_to_cv_image("schedule.pdf")
+def main():
 
-img = crop_schedule_grid(img)
-img = deskew(img)
+    if new_file_downloaded:
+        img = pdf_to_cv_image("schedule.pdf")
+        img = crop_schedule_grid(img)
+        img = deskew(img)
 
-v_peaks, _ = detect_vertical_separators(img)
-img_v = draw_vertical_overlay(img, v_peaks)
+        v_peaks, _ = detect_vertical_separators(img)
+        h_peaks = detect_horizontal_separators(img)
 
-h_peaks = detect_horizontal_separators(img)
-img_final = draw_horizontal_overlay(img_v, h_peaks)
+        save_processed(img, v_peaks, h_peaks)
 
-cv2.imwrite("final_overlay.png", img_final)
-drive.push_file(OVERLAY_FOLDER, "final_overlay.png")
+        # Save for remote debug
+        img_v = draw_vertical_overlay(img, v_peaks)
+        img_final = draw_horizontal_overlay(img_v, h_peaks)
 
-locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
+        cv2.imwrite("final_overlay.png", img_final)
+        drive.push_file(OVERLAY_FOLDER, "final_overlay.png")
 
-today = datetime.now()
-print(today.strftime("%A %d %B %Y"))
-day=today.weekday()
-# print("Vertical peaks (columns):", v_peaks)
-# print("Horizontal peaks (rows):", h_peaks)
+    elif os.path.exists(PROCESSED_IMAGE_PATH) and os.path.exists(PEAKS_PATH):
+        img, v_peaks, h_peaks = load_processed()
 
-cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
-cv2.setWindowProperty(
-    "Image",
-    cv2.WND_PROP_FULLSCREEN,
-    cv2.WINDOW_FULLSCREEN
-)
+    else:
+        print("No processed image found, processing local file...")
+        img = pdf_to_cv_image("schedule.pdf")
+        img = crop_schedule_grid(img)
+        img = deskew(img)
 
-if day >= len(h_peaks) - 2:
-    print("No schedule available for today.")
-else:
-    today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
-    cv2.imwrite("today_section.png", today_display)
-    cv2.imshow("Image", today_display)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+        v_peaks, _ = detect_vertical_separators(img)
+        h_peaks = detect_horizontal_separators(img)
+
+        save_processed(img, v_peaks, h_peaks)
+
+    locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
+
+    today = datetime.now()
+    print(today.strftime("%A %d %B %Y"))
+    day=today.weekday()
+    # print("Vertical peaks (columns):", v_peaks)
+    # print("Horizontal peaks (rows):", h_peaks)
+
+    cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty(
+        "Image",
+        cv2.WND_PROP_FULLSCREEN,
+        cv2.WINDOW_FULLSCREEN
+    )
+
+    text = ocr(img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[1]])
+    print("OCR:")
+    print(text)
+    match = re.search(r'\d+', text)
+    ocr_day = int(match.group()) if match else None
+
+    # Compare with today's day
+    today_day = datetime.now().day
+
+    # Day-of-month of the same weekday in each of the previous 4 weeks
+    previous_weeks_days = {
+        (today - timedelta(weeks=n)).day for n in range(1, 5)
+    }
+    wrong_week = False
+    if ocr_day is None:
+        print("⚠️  Could not extract day number from OCR")
+    elif ocr_day == today_day:
+        print(f"✅ OCR day ({ocr_day}) matches today ({today_day})")
+    elif ocr_day in previous_weeks_days:
+        print("OCR definitively found this is older week")
+        wrong_week = True
+    else:
+        print(f"⚠️  Mismatch: OCR says {ocr_day}, today is {today_day}")
+
+    while True:
+        # Wrong week or Week-end or night
+        if wrong_week or (day >= len(h_peaks) - 2 or datetime.now().hour >= 20 or datetime.now().hour < 7):
+            # Create a fully black 720p background
+            background = np.zeros(
+                (HEIGHT, WIDTH, 3),
+                dtype=np.uint8
+            )
+        else:
+            # debug
+            # today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
+            # cv2.imwrite("today_section.png", today_display)
+
+            today_display = img[
+                h_peaks[day+1]:h_peaks[day+2],
+                v_peaks[1]:v_peaks[-1]
+            ]
+
+            background = fit_to_canvas(today_display)
+
+        # Blend overlay
+        overlay = create_clock_overlay()
+        result = blend_overlay(background, overlay)
+
+        cv2.imshow("Image", result)
+
+        key = cv2.waitKey(10000)
+        if key in (13, 27, ord('q')):  # Enter, ESC, or 'q'
+            break
+
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()

@@ -8,7 +8,7 @@ Type=simple
 User=rpy
 Environment=DISPLAY=:0
 WorkingDirectory=/home/rpy/Activities
-ExecStart=/home/rpy/Activities/venv/bin/python /home/rpy/Activities/activities.py
+ExecStart=/home/rpy/Activities/venv/bin/python -u /home/rpy/Activities/activities.py
 Restart=always
 RestartSec=5
 
