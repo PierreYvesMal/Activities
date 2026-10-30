@@ -32,11 +32,12 @@ flowchart TD
     C -->|Evening| F[Display error]
 ```
 
-The activity display checks Drive on each 10-second cycle. Weekdays from 07:00
-through 19:59 display the schedule; 20:00-21:59 display an error; 22:00-06:59
-and weekends display black. A newly processed schedule stays in the error state
-until a later PDF passes the date OCR check. The feed watcher is a separate
-process because it owns the authenticated Chromium session.
+The activity display rechecks the time and Drive after each 10-minute display
+timeout. Weekdays from 07:00 through 19:59 display the schedule; 20:00-21:59
+display an error; 22:00-06:59 and weekends display black. A newly processed
+schedule stays in the error state until a later PDF passes the date OCR check.
+The feed watcher is a separate process because it owns the authenticated
+Chromium session.
 
 # Test
 ```
