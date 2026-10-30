@@ -10,12 +10,11 @@ sudo apt install tesseract-ocr tesseract-ocr-fra
 pip install -r requirements.txt
 playwright install chromium
 
-# Install and start the systemd services independently. On the watcher's first
-# run, complete the sign-in in the Chromium window.
-sudo cp services/watcher.service services/activities.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now watcher.service
-sudo systemctl enable --now activities.service
+# Build and install the package. It enables and starts the services.
+make package
+sudo apt install ./activities.deb
+
+# On the watcher's first run, complete the sign-in in the Chromium window.
 
 ## Alternative: run manually
 
