@@ -8,6 +8,9 @@ from drive import GoogleDriveClient
 import signal
 import pytesseract
 import re
+import queue
+import sys
+import threading
 from enum import Enum, auto
 
 HEIGHT = 720
@@ -21,15 +24,106 @@ def signal_handler(sig, frame):
     running = False
     cv2.destroyAllWindows()
 
+PARENT_FOLDER = "1tjS1TeSpLYuGaYXSph_nBnRmmaIFi2Gm"
 INPUT_FOLDER = "1rYLC7Dqrb5CpzmLpmdvTkjCiiHAk2Uff"
 PROCESSED_FOLDER = "1CDgW498BhuhpJ1uX1F2an7sGsRtxllB1"
 OVERLAY_FOLDER = "15D2aJsFI7FKgRF6H62u-q7Tni5b7ppvv"
+PHOTO_FOLDER_ID = "1hC_QdM4fuYC4XmppprZQ6DZre1bDjbmI"
+PHOTO_IMAGE_PATH = "drive_photo.jpg"
 PROCESSED_IMAGE_PATH = "processed.npy"
 PEAKS_PATH = "peaks.npz"
 DAY_START_HOUR = 7
 DAY_END_HOUR = 20
 NIGHT_START_HOUR = 22
 DISPLAY_TIMEOUT_MS = 10000
+
+
+class DriveLogAppender:
+    def __init__(self, fallback_stream):
+        self.fallback_stream = fallback_stream
+        self.pending = queue.Queue()
+        self.ready = threading.Event()
+        self.disabled = threading.Event()
+        self.stopping = threading.Event()
+        self.drive_client = None
+        self.document_id = None
+        self.worker = threading.Thread(target=self._run, daemon=True)
+        self.worker.start()
+
+    def configure(self, drive_client, folder_id):
+        self.drive_client = drive_client
+        self.document_id = drive_client.get_or_create_log_document(folder_id)
+        self.ready.set()
+
+    def write(self, text):
+        if text and not self.disabled.is_set():
+            self.pending.put(text)
+
+    def disable(self):
+        self.disabled.set()
+        while True:
+            try:
+                self.pending.get_nowait()
+            except queue.Empty:
+                break
+        self.stopping.set()
+
+    def close(self):
+        self.stopping.set()
+        self.worker.join(timeout=10)
+
+    def _run(self):
+        while not self.stopping.is_set() or not self.pending.empty():
+            if self.disabled.is_set():
+                return
+            if not self.ready.wait(timeout=1):
+                if self.stopping.is_set():
+                    return
+                continue
+
+            batch = []
+            try:
+                batch.append(self.pending.get(timeout=5))
+            except queue.Empty:
+                continue
+
+            while len(batch) < 100:
+                try:
+                    batch.append(self.pending.get_nowait())
+                except queue.Empty:
+                    break
+
+            try:
+                self.drive_client.append_to_document(
+                    self.document_id, "".join(batch)
+                )
+            except Exception as exc:
+                self.fallback_stream.write(f"Drive log append failed: {exc}\n")
+                self.fallback_stream.flush()
+
+
+class TeeWriter:
+    def __init__(self, stream, appender):
+        self.stream = stream
+        self.appender = appender
+
+    @property
+    def encoding(self):
+        return self.stream.encoding
+
+    def write(self, text):
+        written = self.stream.write(text)
+        self.appender.write(text)
+        return written
+
+    def flush(self):
+        self.stream.flush()
+
+    def isatty(self):
+        return self.stream.isatty()
+
+    def fileno(self):
+        return self.stream.fileno()
 
 
 class State(Enum):
@@ -465,6 +559,19 @@ def make_error_background():
     )
     return background
 
+def load_drive_photo(drive_client):
+    if not PHOTO_FOLDER_ID:
+        return None
+
+    photo = drive_client.find_image_file(PHOTO_FOLDER_ID)
+    if photo is None:
+        return None
+
+    drive_client.download_file(photo["id"], PHOTO_IMAGE_PATH)
+    image = cv2.imread(PHOTO_IMAGE_PATH, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError(f"Could not decode Drive photo: {photo['name']}")
+    return image
 
 def show_background(background):
     result = blend_overlay(background, create_clock_overlay())
@@ -474,15 +581,20 @@ def show_background(background):
         global running
         running = False
 
-
 def main():
     global running
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    log_appender = DriveLogAppender(original_stderr)
+    sys.stdout = TeeWriter(original_stdout, log_appender)
+    sys.stderr = TeeWriter(original_stderr, log_appender)
     state = State.INIT
     drive_client = None
     img = v_peaks = h_peaks = None
     schedule_valid = None
 
     while running:
+        previous_state = state
         if state is State.INIT:
             signal.signal(signal.SIGINT, signal_handler)
             signal.signal(signal.SIGTERM, signal_handler)
@@ -491,6 +603,12 @@ def main():
             except locale.Error as exc:
                 print(f"French locale unavailable; using system locale: {exc}")
             drive_client = GoogleDriveClient()
+            try:
+                log_appender.configure(drive_client, PARENT_FOLDER)
+                print(f"Google Docs log ready: {drive_client.LOG_DOCUMENT_NAME}")
+            except Exception as exc:
+                log_appender.disable()
+                print(f"Google Docs logging unavailable: {exc}")
             cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
             cv2.setWindowProperty(
                 "Image", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN
@@ -576,10 +694,29 @@ def main():
             state = State.CHECK_TIME
 
         elif state is State.DISPLAY_ERROR:
-            show_background(make_error_background())
+            try:
+                photo = load_drive_photo(drive_client)
+                if photo is None:
+                    show_background(make_error_background())
+                else:
+                    show_background(fit_to_canvas(photo))
+            except Exception as exc:
+                print(f"Could not display Drive photo: {exc}")
+                show_background(make_error_background())
             state = State.CHECK_TIME
 
+        if state is not previous_state:
+            print(
+                f"{datetime.now().isoformat(timespec='seconds')} "
+                f"State transition: {previous_state.name} -> {state.name}"
+            )
+
     cv2.destroyAllWindows()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    log_appender.close()
+    sys.stdout = original_stdout
+    sys.stderr = original_stderr
 
 if __name__ == "__main__":
     main()

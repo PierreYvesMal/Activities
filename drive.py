@@ -13,6 +13,7 @@ from googleapiclient.http import MediaFileUpload
 
 class GoogleDriveClient:
     SCOPES = ["https://www.googleapis.com/auth/drive"]
+    LOG_DOCUMENT_NAME = "activities.log"
 
     def __init__(
         self,
@@ -43,7 +44,48 @@ class GoogleDriveClient:
             with open(self.token_file, "wb") as f:
                 pickle.dump(creds, f)
 
+        self.docs_service = build("docs", "v1", credentials=creds)
         return build("drive", "v3", credentials=creds)
+
+    def get_or_create_log_document(self, folder_id):
+        results = self.service.files().list(
+            q=(
+                f"name='{self.LOG_DOCUMENT_NAME}' and "
+                f"mimeType='application/vnd.google-apps.document' and "
+                f"'{folder_id}' in parents and trashed=false"
+            ),
+            orderBy="modifiedTime desc",
+            pageSize=1,
+            fields="files(id,name)",
+        ).execute()
+        documents = results.get("files", [])
+        if documents:
+            return documents[0]["id"]
+
+        document = self.service.files().create(
+            body={
+                "name": self.LOG_DOCUMENT_NAME,
+                "mimeType": "application/vnd.google-apps.document",
+                "parents": [folder_id],
+            },
+            fields="id,name",
+        ).execute()
+        return document["id"]
+
+    def append_to_document(self, document_id, text):
+        self.docs_service.documents().batchUpdate(
+            documentId=document_id,
+            body={
+                "requests": [
+                    {
+                        "insertText": {
+                            "endOfSegmentLocation": {},
+                            "text": text,
+                        }
+                    }
+                ]
+            },
+        ).execute()
 
     def find_file(self, folder_id, filename):
         results = self.service.files().list(
@@ -69,6 +111,16 @@ class GoogleDriveClient:
                 return file
 
         return None
+
+    def find_image_file(self, folder_id):
+        results = self.service.files().list(
+            q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false",
+            orderBy="modifiedTime desc",
+            fields="files(id,name,mimeType,parents)",
+        ).execute()
+
+        files = results.get("files", [])
+        return files[0] if files else None
 
     def download_file(self, file_id, destination):
         request = self.service.files().get_media(fileId=file_id)

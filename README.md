@@ -37,3 +37,8 @@ through 19:59 display the schedule; 20:00-21:59 display an error; 22:00-06:59
 and weekends display black. A newly processed schedule stays in the error state
 until a later PDF passes the date OCR check. The feed watcher is a separate
 process because it owns the authenticated Chromium session.
+
+# Test
+```
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/py/Activities/venv/bin/python -m pytest -q tests/test_watcher.py
+```
