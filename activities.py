@@ -33,9 +33,9 @@ PHOTO_IMAGE_PATH = "drive_photo.jpg"
 PROCESSED_IMAGE_PATH = "processed.npy"
 PEAKS_PATH = "peaks.npz"
 DAY_START_HOUR = 7
-DAY_END_HOUR = 20
+DAY_END_HOUR = 18
 NIGHT_START_HOUR = 22
-DISPLAY_TIMEOUT_MS = 10000
+DISPLAY_TIMEOUT_MS = 600000
 
 
 class DriveLogAppender:
@@ -561,6 +561,7 @@ def make_error_background():
 
 def load_drive_photo(drive_client):
     if not PHOTO_FOLDER_ID:
+        print(f"Could not display Drive photo: PHOTO_FOLDER_ID is None")
         return None
 
     photo = drive_client.find_image_file(PHOTO_FOLDER_ID)
@@ -697,6 +698,7 @@ def main():
             try:
                 photo = load_drive_photo(drive_client)
                 if photo is None:
+                    print(f"Could not display Drive photo: photo is None")
                     show_background(make_error_background())
                 else:
                     show_background(fit_to_canvas(photo))

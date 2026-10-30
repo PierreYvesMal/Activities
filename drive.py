@@ -2,6 +2,7 @@ import io
 import os
 import pickle
 import fnmatch
+import random
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -113,14 +114,25 @@ class GoogleDriveClient:
         return None
 
     def find_image_file(self, folder_id):
-        results = self.service.files().list(
-            q=f"'{folder_id}' in parents and mimeType contains 'image/' and trashed=false",
-            orderBy="modifiedTime desc",
-            fields="files(id,name,mimeType,parents)",
-        ).execute()
+        files = []
+        page_token = None
+        while True:
+            results = self.service.files().list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                pageSize=1000,
+                pageToken=page_token,
+                fields="nextPageToken,files(id,name,mimeType,parents)",
+            ).execute()
+            files.extend(
+                file
+                for file in results.get("files", [])
+                if file.get("mimeType", "").startswith("image/")
+            )
+            page_token = results.get("nextPageToken")
+            if not page_token:
+                break
 
-        files = results.get("files", [])
-        return files[0] if files else None
+        return random.choice(files) if files else None
 
     def download_file(self, file_id, destination):
         request = self.service.files().get_media(fileId=file_id)
