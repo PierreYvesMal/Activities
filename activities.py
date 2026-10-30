@@ -2,14 +2,13 @@ import cv2
 import numpy as np
 import os
 from pdf2image import convert_from_path
-from datetime import datetime, timedelta
+from datetime import datetime
 import locale
 from drive import GoogleDriveClient
 import signal
-import sys
-import time
 import pytesseract
 import re
+from enum import Enum, auto
 
 HEIGHT = 720
 WIDTH = 1280
@@ -27,20 +26,22 @@ PROCESSED_FOLDER = "1CDgW498BhuhpJ1uX1F2an7sGsRtxllB1"
 OVERLAY_FOLDER = "15D2aJsFI7FKgRF6H62u-q7Tni5b7ppvv"
 PROCESSED_IMAGE_PATH = "processed.npy"
 PEAKS_PATH = "peaks.npz"
+DAY_START_HOUR = 7
+DAY_END_HOUR = 20
+NIGHT_START_HOUR = 22
+DISPLAY_TIMEOUT_MS = 10000
 
-drive = GoogleDriveClient()
 
-new_file_downloaded = False
-
-file = drive.find_file_pattern(INPUT_FOLDER, "*.pdf")
-
-if file is None:
-    print("Not found")
-else:
-    drive.download_file(file["id"], "schedule.pdf")
-    drive.move_file(file["id"], PROCESSED_FOLDER)
-    print("Probably Downloaded and moved schedule.pdf")
-    new_file_downloaded = True
+class State(Enum):
+    INIT = auto()
+    CHECK_TIME = auto()
+    ACTIVITIES = auto()
+    FETCH_DRIVE = auto()
+    PROCESS_IMAGE = auto()
+    VALIDATE_SCHEDULE = auto()
+    DISPLAY_PROCESSED = auto()
+    DISPLAY_BLACK = auto()
+    DISPLAY_ERROR = auto()
 
 # =========================
 # IO / BASIC UTILITIES
@@ -384,107 +385,199 @@ def ocr(img):
 # PIPELINE
 # =========================
 
-def main():
+def classify_time(now):
+    if now.weekday() >= 5 or now.hour < DAY_START_HOUR or now.hour >= NIGHT_START_HOUR:
+        return State.DISPLAY_BLACK
+    if now.hour >= DAY_END_HOUR:
+        return State.DISPLAY_ERROR
+    return State.ACTIVITIES
 
-    if new_file_downloaded:
-        img = pdf_to_cv_image("schedule.pdf")
-        img = crop_schedule_grid(img)
-        img = deskew(img)
 
-        v_peaks, _ = detect_vertical_separators(img)
-        h_peaks = detect_horizontal_separators(img)
+def state_without_new_file(schedule_valid, has_processed_image, has_local_pdf):
+    if has_processed_image:
+        return State.DISPLAY_ERROR if schedule_valid is False else State.DISPLAY_PROCESSED
+    if has_local_pdf:
+        return State.PROCESS_IMAGE
+    return State.DISPLAY_ERROR
 
-        save_processed(img, v_peaks, h_peaks)
 
-        # Save for remote debug
-        img_v = draw_vertical_overlay(img, v_peaks)
-        img_final = draw_horizontal_overlay(img_v, h_peaks)
+def load_or_process_local_schedule():
+    if os.path.exists(PROCESSED_IMAGE_PATH) and os.path.exists(PEAKS_PATH):
+        return load_processed()
 
-        cv2.imwrite("final_overlay.png", img_final)
-        drive.push_file(OVERLAY_FOLDER, "final_overlay.png")
+    print("No processed image found, processing local file...")
+    img = pdf_to_cv_image("schedule.pdf")
+    img = deskew(crop_schedule_grid(img))
+    v_peaks, _ = detect_vertical_separators(img)
+    h_peaks = detect_horizontal_separators(img)
+    save_processed(img, v_peaks, h_peaks)
+    return img, v_peaks, h_peaks
 
-    elif os.path.exists(PROCESSED_IMAGE_PATH) and os.path.exists(PEAKS_PATH):
-        img, v_peaks, h_peaks = load_processed()
 
-    else:
-        print("No processed image found, processing local file...")
-        img = pdf_to_cv_image("schedule.pdf")
-        img = crop_schedule_grid(img)
-        img = deskew(img)
+def process_new_schedule(drive_client):
+    img = pdf_to_cv_image("schedule.pdf")
+    img = deskew(crop_schedule_grid(img))
+    v_peaks, _ = detect_vertical_separators(img)
+    h_peaks = detect_horizontal_separators(img)
+    save_processed(img, v_peaks, h_peaks)
 
-        v_peaks, _ = detect_vertical_separators(img)
-        h_peaks = detect_horizontal_separators(img)
+    img_v = draw_vertical_overlay(img, v_peaks)
+    img_final = draw_horizontal_overlay(img_v, h_peaks)
+    cv2.imwrite("final_overlay.png", img_final)
+    try:
+        drive_client.push_file(OVERLAY_FOLDER, "final_overlay.png")
+    except Exception as exc:
+        print(f"Could not upload debug overlay: {exc}")
 
-        save_processed(img, v_peaks, h_peaks)
+    return img, v_peaks, h_peaks
 
-    locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
 
-    today = datetime.now()
-    print(today.strftime("%A %d %B %Y"))
-    day=today.weekday()
-    # print("Vertical peaks (columns):", v_peaks)
-    # print("Horizontal peaks (rows):", h_peaks)
+def schedule_is_up_to_date(img, v_peaks, h_peaks, today):
+    day = today.weekday()
+    if day + 2 >= len(h_peaks) or len(v_peaks) < 2:
+        print("Schedule separators do not contain today's header cell")
+        return False
 
-    cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
-    cv2.setWindowProperty(
-        "Image",
-        cv2.WND_PROP_FULLSCREEN,
-        cv2.WINDOW_FULLSCREEN
-    )
-
-    text = ocr(img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[1]])
-    print("OCR:")
-    print(text)
-    match = re.search(r'\d+', text)
+    header = img[h_peaks[day + 1]:h_peaks[day + 2], v_peaks[0]:v_peaks[1]]
+    text = ocr(header)
+    print(f"OCR: {text}")
+    match = re.search(r"\d+", text)
     ocr_day = int(match.group()) if match else None
+    if ocr_day == today.day:
+        print(f"OCR day ({ocr_day}) matches today ({today.day})")
+        return True
 
-    # Compare with today's day
-    today_day = datetime.now().day
+    print(f"Schedule is not up to date (OCR day: {ocr_day}, today: {today.day})")
+    return False
 
-    # Day-of-month of the same weekday in each of the previous 4 weeks
-    previous_weeks_days = {
-        (today - timedelta(weeks=n)).day for n in range(1, 5)
-    }
-    wrong_week = False
-    if ocr_day is None:
-        print("⚠️  Could not extract day number from OCR")
-    elif ocr_day == today_day:
-        print(f"✅ OCR day ({ocr_day}) matches today ({today_day})")
-    elif ocr_day in previous_weeks_days:
-        print("OCR definitively found this is older week")
-        wrong_week = True
-    else:
-        print(f"⚠️  Mismatch: OCR says {ocr_day}, today is {today_day}")
 
-    while True:
-        # Wrong week or Week-end or night
-        if wrong_week or (day >= len(h_peaks) - 2 or datetime.now().hour >= 20 or datetime.now().hour < 7):
-            # Create a fully black 720p background
-            background = np.zeros(
-                (HEIGHT, WIDTH, 3),
-                dtype=np.uint8
+def make_error_background():
+    background = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+    cv2.putText(
+        background,
+        "SCHEDULE ERROR",
+        (70, HEIGHT // 2),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        2,
+        (0, 0, 255),
+        4,
+        cv2.LINE_AA,
+    )
+    return background
+
+
+def show_background(background):
+    result = blend_overlay(background, create_clock_overlay())
+    cv2.imshow("Image", result)
+    key = cv2.waitKey(DISPLAY_TIMEOUT_MS)
+    if key in (13, 27, ord("q")):
+        global running
+        running = False
+
+
+def main():
+    global running
+    state = State.INIT
+    drive_client = None
+    img = v_peaks = h_peaks = None
+    schedule_valid = None
+
+    while running:
+        if state is State.INIT:
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            try:
+                locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")
+            except locale.Error as exc:
+                print(f"French locale unavailable; using system locale: {exc}")
+            drive_client = GoogleDriveClient()
+            cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
+            cv2.setWindowProperty(
+                "Image", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN
             )
-        else:
-            # debug
-            # today_display = img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[-1]]
-            # cv2.imwrite("today_section.png", today_display)
+            state = State.CHECK_TIME
 
-            today_display = img[
-                h_peaks[day+1]:h_peaks[day+2],
-                v_peaks[1]:v_peaks[-1]
-            ]
+        elif state is State.CHECK_TIME:
+            state = classify_time(datetime.now())
 
-            background = fit_to_canvas(today_display)
+        elif state is State.ACTIVITIES:
+            state = State.FETCH_DRIVE
 
-        # Blend overlay
-        overlay = create_clock_overlay()
-        result = blend_overlay(background, overlay)
+        elif state is State.FETCH_DRIVE:
+            try:
+                new_file = drive_client.find_file_pattern(INPUT_FOLDER, "*.pdf")
+                if new_file is not None:
+                    drive_client.download_file(new_file["id"], "schedule.pdf")
+                    drive_client.move_file(new_file["id"], PROCESSED_FOLDER)
+                    print("Downloaded and moved a new schedule PDF")
+                    schedule_valid = None
+                    state = State.PROCESS_IMAGE
+                else:
+                    has_processed_image = (
+                        os.path.exists(PROCESSED_IMAGE_PATH)
+                        and os.path.exists(PEAKS_PATH)
+                    )
+                    has_local_pdf = os.path.exists("schedule.pdf")
+                    state = state_without_new_file(
+                        schedule_valid, has_processed_image, has_local_pdf
+                    )
+                    if has_processed_image:
+                        img, v_peaks, h_peaks = load_processed()
+                    elif not has_local_pdf:
+                        print("No new schedule or processed image found")
+            except Exception as exc:
+                print(f"Drive fetch failed: {exc}")
+                state = State.DISPLAY_ERROR
 
-        cv2.imshow("Image", result)
+        elif state is State.PROCESS_IMAGE:
+            try:
+                img, v_peaks, h_peaks = process_new_schedule(drive_client)
+                state = State.VALIDATE_SCHEDULE
+            except Exception as exc:
+                print(f"Schedule processing failed: {exc}")
+                schedule_valid = False
+                state = State.DISPLAY_ERROR
 
-        key = cv2.waitKey(10000)
-        if key in (13, 27, ord('q')):  # Enter, ESC, or 'q'
-            break
+        elif state is State.VALIDATE_SCHEDULE:
+            try:
+                schedule_valid = schedule_is_up_to_date(
+                    img, v_peaks, h_peaks, datetime.now()
+                )
+                state = (
+                    State.DISPLAY_PROCESSED
+                    if schedule_valid
+                    else State.DISPLAY_ERROR
+                )
+            except Exception as exc:
+                print(f"Schedule OCR failed: {exc}")
+                schedule_valid = False
+                state = State.DISPLAY_ERROR
+
+        elif state is State.DISPLAY_PROCESSED:
+            try:
+                today = datetime.now()
+                row = today.weekday()
+                if img is None:
+                    img, v_peaks, h_peaks = load_or_process_local_schedule()
+                if row + 2 >= len(h_peaks) or len(v_peaks) < 2:
+                    raise ValueError("Schedule separators do not contain today's row")
+                today_display = img[
+                    h_peaks[row + 1]:h_peaks[row + 2],
+                    v_peaks[1]:v_peaks[-1],
+                ]
+                show_background(fit_to_canvas(today_display))
+            except Exception as exc:
+                print(f"Could not display processed schedule: {exc}")
+                show_background(make_error_background())
+            state = State.CHECK_TIME
+
+        elif state is State.DISPLAY_BLACK:
+            show_background(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8))
+            state = State.CHECK_TIME
+
+        elif state is State.DISPLAY_ERROR:
+            show_background(make_error_background())
+            state = State.CHECK_TIME
 
     cv2.destroyAllWindows()
 
