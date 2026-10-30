@@ -10,11 +10,28 @@ sudo apt install tesseract-ocr tesseract-ocr-fra
 pip install -r requirements.txt
 playwright install chromium
 
-# Start the authenticated feed watcher in a separate terminal first.
-python ./watcher.py
+# Install and start the systemd services independently. On the watcher's first
+# run, complete the sign-in in the Chromium window.
+sudo cp services/watcher.service services/activities.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now watcher.service
+sudo systemctl enable --now activities.service
 
-# Start the fullscreen activity display in another terminal.
+## Alternative: run manually
+
+Instead of starting the systemd services, run each process in a separate
+terminal. On the watcher's first run, complete the sign-in in the Chromium
+window.
+
+```sh
+# Terminal 1: authenticated feed watcher
+python ./watcher.py
+```
+
+```sh
+# Terminal 2: fullscreen activity display
 python3 ./activities.py
+```
 
 ```mermaid
 flowchart TD

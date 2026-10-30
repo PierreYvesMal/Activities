@@ -1,0 +1,17 @@
+[Unit]
+Description=Armonea Newsfeed Watcher
+After=graphical.target network-online.target
+Wants=graphical.target network-online.target
+
+[Service]
+Type=simple
+User=rpy
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/rpy/.Xauthority
+Environment=ARMONEA_HEADLESS=0
+WorkingDirectory=/home/rpy/Activities
+ExecStart=/home/rpy/Activities/venv/bin/python -u /home/rpy/Activities/watcher.py
+Restart=no
+
+[Install]
+WantedBy=graphical.target

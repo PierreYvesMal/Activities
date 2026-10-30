@@ -1,6 +1,6 @@
 [Unit]
 Description=Activities Python Application
-After=network-online.target
+After=network-online.target watcher.service
 Wants=network-online.target
 
 [Service]
