@@ -470,7 +470,11 @@ def ocr(img):
         '-c tessedit_char_whitelist='
         'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 '
     )
-    text = pytesseract.image_to_string(gray, lang='fra', config=config)
+    try:
+        text = pytesseract.image_to_string(gray, lang='fra', config=config)
+    except Exception as exc:
+        print(f"OCR failed: {exc}")
+        return ""
 
     return text.strip()
 
