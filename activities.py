@@ -11,8 +11,8 @@ import time
 import pytesseract
 import re
 
-HEIGHT = 720
-WIDTH = 1280
+HEIGHT = 480
+WIDTH = 1920
 
 running = True
 
@@ -27,6 +27,7 @@ PROCESSED_FOLDER = "1CDgW498BhuhpJ1uX1F2an7sGsRtxllB1"
 OVERLAY_FOLDER = "15D2aJsFI7FKgRF6H62u-q7Tni5b7ppvv"
 PROCESSED_IMAGE_PATH = "processed.npy"
 PEAKS_PATH = "peaks.npz"
+DISPLAY_IMAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "opencv-display.jpg")
 
 drive = GoogleDriveClient()
 
@@ -353,6 +354,17 @@ def blend_overlay(background, overlay):
     ).astype(np.uint8)
 
 
+def publish_display(img):
+    encoded, image_data = cv2.imencode(".jpg", img)
+    if not encoded:
+        raise RuntimeError("Could not encode the OpenCV display image")
+
+    temporary_path = DISPLAY_IMAGE_PATH + ".tmp"
+    with open(temporary_path, "wb") as image_file:
+        image_file.write(image_data.tobytes())
+    os.replace(temporary_path, DISPLAY_IMAGE_PATH)
+
+
 # =========================
 # OCR
 # =========================
@@ -417,7 +429,7 @@ def main():
 
         save_processed(img, v_peaks, h_peaks)
 
-    locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
+    # locale.setlocale(locale.LC_TIME, "fr_BE.UTF-8")  # or fr_FR.UTF-8
 
     today = datetime.now()
     print(today.strftime("%A %d %B %Y"))
@@ -425,18 +437,11 @@ def main():
     # print("Vertical peaks (columns):", v_peaks)
     # print("Horizontal peaks (rows):", h_peaks)
 
-    cv2.namedWindow("Image", cv2.WND_PROP_FULLSCREEN)
-    cv2.setWindowProperty(
-        "Image",
-        cv2.WND_PROP_FULLSCREEN,
-        cv2.WINDOW_FULLSCREEN
-    )
-
-    text = ocr(img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[1]])
-    print("OCR:")
-    print(text)
-    match = re.search(r'\d+', text)
-    ocr_day = int(match.group()) if match else None
+    # text = ocr(img[h_peaks[day+1]:h_peaks[day+2], v_peaks[0]:v_peaks[1]])
+    # print("OCR:")
+    # print(text)
+    # match = re.search(r'\d+', text)
+    # ocr_day = int(match.group()) if match else None
 
     # Compare with today's day
     today_day = datetime.now().day
@@ -446,15 +451,15 @@ def main():
         (today - timedelta(weeks=n)).day for n in range(1, 5)
     }
     wrong_week = False
-    if ocr_day is None:
-        print("⚠️  Could not extract day number from OCR")
-    elif ocr_day == today_day:
-        print(f"✅ OCR day ({ocr_day}) matches today ({today_day})")
-    elif ocr_day in previous_weeks_days:
-        print("OCR definitively found this is older week")
-        wrong_week = True
-    else:
-        print(f"⚠️  Mismatch: OCR says {ocr_day}, today is {today_day}")
+    # if ocr_day is None:
+    #     print("⚠️  Could not extract day number from OCR")
+    # elif ocr_day == today_day:
+    #     print(f"✅ OCR day ({ocr_day}) matches today ({today_day})")
+    # elif ocr_day in previous_weeks_days:
+    #     print("OCR definitively found this is older week")
+    #     wrong_week = True
+    # else:
+    #     print(f"⚠️  Mismatch: OCR says {ocr_day}, today is {today_day}")
 
     while True:
         # Wrong week or Week-end or night
@@ -480,13 +485,9 @@ def main():
         overlay = create_clock_overlay()
         result = blend_overlay(background, overlay)
 
-        cv2.imshow("Image", result)
+        publish_display(result)
+        time.sleep(1)
 
-        key = cv2.waitKey(10000)
-        if key in (13, 27, ord('q')):  # Enter, ESC, or 'q'
-            break
-
-    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
