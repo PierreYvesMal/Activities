@@ -2,14 +2,14 @@ cp <filepath/filename.pdf> ./schedule.pdf
 or  
 upload file to google drive
 
+# Setup
+```
 python3 -m venv venv
-
 source venv/bin/activate
-
 sudo apt install tesseract-ocr tesseract-ocr-fra
 pip install -r requirements.txt
 playwright install chromium
-
+```
 # Build and install the package. It enables and starts the services.
 make package
 sudo apt install ./activities.deb

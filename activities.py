@@ -34,7 +34,7 @@ PROCESSED_IMAGE_PATH = "processed.npy"
 PEAKS_PATH = "peaks.npz"
 DAY_START_HOUR = 7
 DAY_END_HOUR = 18
-NIGHT_START_HOUR = 22
+NIGHT_START_HOUR = 21
 DISPLAY_TIMEOUT_MS = 600000
 
 
@@ -484,9 +484,9 @@ def ocr(img):
 # =========================
 
 def classify_time(now):
-    if now.weekday() >= 5 or now.hour < DAY_START_HOUR or now.hour >= NIGHT_START_HOUR:
+    if now.hour < DAY_START_HOUR or now.hour >= NIGHT_START_HOUR:
         return State.DISPLAY_BLACK
-    if now.hour >= DAY_END_HOUR:
+    if now.weekday() >= 5 or now.hour >= DAY_END_HOUR:
         return State.DISPLAY_ERROR
     return State.ACTIVITIES
 
@@ -695,6 +695,7 @@ def main():
             state = State.CHECK_TIME
 
         elif state is State.DISPLAY_BLACK:
+            img = today_display = photo = None
             show_background(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8))
             state = State.CHECK_TIME
 
